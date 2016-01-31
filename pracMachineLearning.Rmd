@@ -1,0 +1,118 @@
+---
+title: "practicalMachineLearning"
+author: "Martin Sawtell"
+date: "Thursday, January 28, 2016"
+output: html_document
+---
+
+# Overview
+This report outlines the process of predicting the manner in which subjects performed physical tests, as measured by various accelerometers. The variable to predict is called CLASSE.
+
+Training dataset:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+Test dataset:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+#Set up environment
+
+First load the required libraries and set the seed (assuming the end user has those libraries installed):
+```{r, message=FALSE, warning=FALSE}
+library(knitr)
+library(RCurl)
+library(corrplot)
+library(caret)
+library(randomForest)
+```
+
+#Load data
+
+Read in the datasets:
+```{r}
+trainURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+tra <- getURL(trainURL)
+tst <- getURL(testURL)
+
+trainingRaw <- read.csv(textConnection(tra))
+testRaw <- read.csv(textConnection(tst))
+
+dim(trainingRaw)
+dim(testRaw)
+
+```
+
+#Data Cleaning and prep
+
+Clean data by removing the ID tags, Near Zero Variance values and useless NA variables:
+
+```{r}
+#nuke the id tags and make a cleaned data object:
+trainingCl <- trainingRaw[, -(1:5)]
+testCl  <- testRaw[, -(1:5)]
+
+#NZV:
+zeroMask <- nearZeroVar(trainingCl)
+trainingCl <- trainingCl[, -zeroMask]
+testCl  <- testCl[, -zeroMask]
+
+length(names(trainingRaw))
+length(names(trainingCl))
+
+#next clean the mainly NA values out:
+AllNA    <- sapply(trainingCl, function(x) mean(!is.na(x))) < 0.95
+trainingCl <- trainingCl[, AllNA==FALSE]
+testCl  <- testCl[, AllNA==FALSE]
+
+length(names(trainingCl))
+```
+
+Now split the trainingCl dataset into the training and validation partitions, using a reproducable seed:
+```{r}
+set.seed(934857)
+inTrain <- createDataPartition(trainingCl$classe, p=0.75, list=F)
+trainSet <- trainingCl[inTrain, ]
+testSet <- trainingCl[-inTrain, ]
+```
+
+#Data Exploration:
+
+Correlation Analysis:
+```{r}
+corrMatrix <- cor(trainSet[, -54])
+corrplot(corrMatrix, order = "FPC", method = "color", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+From a cursory visual inspection it's clear that there are relatively few variables that have a correlation greater than 0.8, so we don't need to run a PCA analysis or further steps. Conveniently the variables with the highest correlations all seem to be accelerometers. For this reason a random forest analysis has been selected:
+
+#Random Forest
+
+```{r}
+control <- trainControl(method="cv", 3)
+model <- train(classe ~ ., data=trainSet, method="rf", trControl=control)
+model
+```
+
+#Error Estimate & Cross Validation
+```{r}
+predict <- predict(model, testSet)
+confusionMatrix(testSet$classe, predict)
+
+#Overall accuracy estimate:
+confusionMatrix(testSet$classe, predict)$overall
+
+#Estimated out of sample error:
+1-as.numeric(confusionMatrix(testSet$classe, predict)$overall[1])
+```
+
+As you can see, the estimated out of sample error rate on the test subset is extremely low. We will move forward with this model.
+
+#Final model validation
+
+Applying the model to the final test dataset:
+```{r}
+predict(model, newdata=testCl)
+```
+
